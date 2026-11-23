@@ -6,6 +6,11 @@ close and read a short story about every world — all drawn with Unicode Braill
 
 **Pure Python 3 · zero dependencies · a single file**
 
+```sh
+curl -fsSL https://raw.githubusercontent.com/dszhlt/orbit-terminal-universe/main/install.sh | sh
+orbit
+```
+
 ![Flying to Saturn and back](screenshots/flight.gif)
 
 ## Screenshots
@@ -52,16 +57,42 @@ close and read a short story about every world — all drawn with Unicode Braill
   GNOME Terminal, Konsole, iTerm2, Windows Terminal… — and a monospace font that has Braille
   glyphs (JetBrains Mono, Cascadia Code, DejaVu Sans Mono and most modern fonts do).
 - A window of at least 64×20. The bigger the window, the more detail; around 200×55 is ideal.
-- On Windows, `curses` is not built in: `pip install windows-curses` should make it work
-  (not tested).
+- On Windows, `curses` is not built in: install with `pipx` / `uv` (it pulls in
+  `windows-curses` automatically) or run `pip install windows-curses` (not tested).
+
+## Install
+
+One line — puts the `orbit` command into `~/.local/bin` (and adds it to your `PATH` if needed):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dszhlt/orbit-terminal-universe/main/install.sh | sh
+```
+
+Or, if you use [pipx](https://pipx.pypa.io) or [uv](https://docs.astral.sh/uv/) (this also works on Windows):
+
+```sh
+pipx install git+https://github.com/dszhlt/orbit-terminal-universe.git
+uv tool install git+https://github.com/dszhlt/orbit-terminal-universe.git
+```
 
 ## Run
 
+From any folder, just type:
+
 ```sh
-git clone https://github.com/diaszulatov-arch/orbit-terminal-universe.git
-cd orbit-terminal-universe
-python3 orbit.py              # English
-python3 orbit.py --lang ru    # Russian
+orbit              # English
+orbit --lang ru    # Russian
+```
+
+To update, run the install command again. To uninstall:
+`curl -fsSL https://raw.githubusercontent.com/dszhlt/orbit-terminal-universe/main/install.sh | sh -s -- --uninstall`
+(or `pipx uninstall orbit-terminal-universe` / `uv tool uninstall orbit-terminal-universe`).
+
+Prefer not to install anything? It is a single file:
+
+```sh
+git clone https://github.com/dszhlt/orbit-terminal-universe.git
+python3 orbit-terminal-universe/orbit.py
 ```
 
 ## Controls

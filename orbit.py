@@ -4,8 +4,8 @@
 ORBIT / TERMINAL UNIVERSE
 An interactive Solar System right in your terminal.
 
-    python3 orbit.py            # English (default)
-    python3 orbit.py --lang ru  # Russian
+    orbit                       # English (default)
+    orbit --lang ru             # Russian
 
 Controls
     ← →   (A D)       select a body / fly to the neighbouring one
@@ -2382,7 +2382,8 @@ def main(scr, lang):
     return app
 
 
-if __name__ == '__main__':
+def cli():
+    """Entry point of the `orbit` command."""
     import argparse
     ap = argparse.ArgumentParser(description='ORBIT / TERMINAL UNIVERSE — '
                                  'an interactive Solar System in your terminal.')
@@ -2401,3 +2402,7 @@ if __name__ == '__main__':
             if w:
                 print(f'{name}: avg {sum(w) / len(w) * 1000:.1f} ms, '
                       f'p95 {w[int(len(w) * 0.95)] * 1000:.1f} ms, max {w[-1] * 1000:.1f} ms')
+
+
+if __name__ == '__main__':
+    cli()
