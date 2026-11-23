@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orbit-terminal-universe"
+version = "1.1.0"
+description = "An interactive Solar System in your terminal, drawn with Unicode Braille and 256 colors"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
+dependencies = ["windows-curses; sys_platform == 'win32'"]
+keywords = ["terminal", "curses", "solar-system", "astronomy", "tui"]
+classifiers = [
+    "Environment :: Console :: Curses",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Games/Entertainment",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+
+[project.urls]
+Homepage = "https://github.com/dszhlt/orbit-terminal-universe"
+
+[project.scripts]
+orbit = "orbit:cli"
+
+[tool.setuptools]
+py-modules = ["orbit"]
