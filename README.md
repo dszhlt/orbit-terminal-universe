@@ -41,6 +41,7 @@ close and read a short story about every world — all drawn with Unicode Braill
     cratered **Mercury**, **Venus** with its cloud chevrons, a **Sun** with sunspots and
     prominences, plus moons with their own surfaces: volcanic Io, cracked icy Europa, hazy Titan.
 - **Info panel** — key facts and a short story for every body, typed out like a ship's computer.
+- **Clean view** — press `H` to hide the whole interface and enjoy the planets full-screen.
 - **English and Russian** — English by default, press `L` to switch at any time.
 - **Mouse support** — click a planet to fly to it, use the wheel to zoom.
 
@@ -76,6 +77,7 @@ python3 orbit.py --lang ru    # Russian
 | `<` `>` (or `[` `]`) | simulation speed |
 | `Space` | pause |
 | `I` | hide / show the info panel |
+| `H` / `Tab` | clean view: hide every panel, frame and label — only the planets remain |
 | `L` | switch language: English ↔ Russian |
 | `Q` | quit |
 | Mouse | click a planet to fly to it, scroll to zoom |

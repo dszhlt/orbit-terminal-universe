@@ -16,6 +16,7 @@ Controls
     < >   [ ]         simulation speed
     SPACE             pause
     I                 hide / show the info panel
+    H  TAB            clean view: hide every panel, leave only the planets
     L                 switch language (English / Russian)
     0 … 8             quick jump: 0 — Sun, 1 — Mercury … 8 — Neptune
     Q                 quit
@@ -380,22 +381,24 @@ UI = {
         too_small='Please enlarge the terminal window (min 64×20)',
         course='▸ COURSE: {}', back='◂ RETURNING TO SYSTEM VIEW',
         hints_view=[('SPACE', 'pause'), ('← →', 'select'), ('ENTER', 'approach'),
-                    ('+/-', 'zoom'), ('< >', 'time'), ('0-8', 'jump'), ('L', 'русский'),
-                    ('Q', 'quit')],
+                    ('+/-', 'zoom'), ('< >', 'time'), ('0-8', 'jump'), ('H', 'clean view'),
+                    ('L', 'русский'), ('Q', 'quit')],
         hints_body=[('ESC', 'back'), ('← →', 'next planet'), ('↑ ↓', 'scroll'),
-                    ('+/-', 'zoom'), ('I', 'panel'), ('L', 'русский'), ('SPACE', 'pause'),
-                    ('Q', 'quit')]),
+                    ('+/-', 'zoom'), ('I', 'panel'), ('H', 'clean view'), ('L', 'русский'),
+                    ('SPACE', 'pause'), ('Q', 'quit')],
+        clean_hint='[H] show interface'),
     'ru': dict(
         boot='инициализация симуляции…', terrain='▸ рельеф и облака: {}', moons='СПУТНИКИ',
         ephem='▸ эфемериды на {}', date='%d.%m.%Y',
         too_small='Увеличьте окно терминала (минимум 64×20)',
         course='▸ КУРС {}', back='◂ ВОЗВРАТ НА ОБЗОРНУЮ ОРБИТУ',
         hints_view=[('SPACE', 'пауза'), ('← →', 'выбор'), ('ENTER', 'приблизиться'),
-                    ('+/-', 'зум'), ('< >', 'время'), ('0-8', 'перелёт'), ('L', 'english'),
-                    ('Q', 'выход')],
+                    ('+/-', 'зум'), ('< >', 'время'), ('0-8', 'перелёт'), ('H', 'чистый вид'),
+                    ('L', 'english'), ('Q', 'выход')],
         hints_body=[('ESC', 'назад'), ('← →', 'соседняя планета'), ('↑ ↓', 'текст'),
-                    ('+/-', 'зум'), ('I', 'панель'), ('L', 'english'), ('SPACE', 'пауза'),
-                    ('Q', 'выход')]),
+                    ('+/-', 'зум'), ('I', 'панель'), ('H', 'чистый вид'), ('L', 'english'),
+                    ('SPACE', 'пауза'), ('Q', 'выход')],
+        clean_hint='[H] вернуть интерфейс'),
 }
 
 
@@ -1145,6 +1148,8 @@ class App:
         self.user_zoom = 1.0
         self.detail_zoom = 1.0
         self.panel_on = True
+        self.clean = False               # clean view: no frame, panels or labels
+        self.clean_t = -1e9
         self.scroll = 0
         self.arrive = 0.0
         self.fps = float(FPS_TARGET)
@@ -1232,8 +1237,12 @@ class App:
     def resize(self):
         self.H, self.W = self.scr.getmaxyx()
         self.too_small = self.W < 64 or self.H < 20
-        self.cw = max(1, self.W - 2)
-        self.ch = max(1, self.H - 8)
+        if self.clean:                   # the scene takes the whole window
+            self.ox, self.oy = 0, 0
+            self.cw, self.ch = max(1, self.W), max(1, self.H)
+        else:                            # inside the frame, below the header
+            self.ox, self.oy = 1, 3
+            self.cw, self.ch = max(1, self.W - 2), max(1, self.H - 8)
         self.cv = Canvas(self.cw, self.ch)
         pw, ph = self.cv.pw, self.cv.ph
         self.base_ppu = min(pw * 0.47 / 128.0, ph * 0.45 / (128.0 * SIN_E))
@@ -1243,7 +1252,7 @@ class App:
         self.panel_cache.clear()
         rnd = random.Random(42)
         self.stars = []
-        for _ in range(self.cw * self.ch // 24):
+        for _ in range(self.W * self.H // 24):           # in screen cells: stay put on toggle
             p = rnd.random()
             if p < 0.48:
                 ch, c = '.', 240
@@ -1253,7 +1262,7 @@ class App:
                 ch, c = '*', 250
             else:
                 ch, c = '+', 80 if rnd.random() < 0.6 else 30
-            self.stars.append((rnd.random() * self.cw, rnd.random() * self.ch,
+            self.stars.append((rnd.random() * self.W, rnd.random() * self.H,
                                rnd.choice((0.008, 0.02, 0.045)), ch, c,
                                rnd.random() * TAU, rnd.uniform(0.4, 2.2)))
 
@@ -1272,7 +1281,7 @@ class App:
         b = self.bodies[idx]
         X, Y = self.body_world(b)
         pw, ph = self.cv.pw, self.cv.ph
-        avail = (self.cw - (self.panel_w if self.panel_on else 0)) * 2
+        avail = (self.cw - (self.panel_w if self.panel_on and not self.clean else 0)) * 2
         rt = min(ph * 0.40 / b.ext_v, avail * 0.46 / b.ext_h) * self.detail_zoom
         return (X, Y * SIN_E, avail * 0.5 / pw, 0.5, rt / b.r)
 
@@ -1355,7 +1364,13 @@ class App:
             elif k in ']>.юЮъ':
                 self.speed_i = min(len(SPEEDS) - 1, self.speed_i + 1)
             elif k in 'iIшШ':
-                self.panel_on = not self.panel_on
+                if self.clean:                               # bring the interface back with the panel
+                    self.toggle_clean(now)
+                    self.panel_on = True
+                else:
+                    self.panel_on = not self.panel_on
+            elif k in 'hHрР\t':
+                self.toggle_clean(now)
             elif k in 'aAфФ':
                 self.step_sel(-1, now)
             elif k in 'dDвВ':
@@ -1392,6 +1407,15 @@ class App:
             self.mouse(now)
         return True
 
+    def toggle_clean(self, now):
+        self.clean = not self.clean
+        self.clean_t = now
+        self.resize()                    # the camera glides to the new framing by itself
+        self.scr.erase()
+
+    def show_panel(self):
+        return self.mode == 'detail' and self.panel_on and not self.clean
+
     def enter(self, now):
         if self.mode == 'detail':
             self.arrive = -1e9                               # reveal the whole text
@@ -1418,10 +1442,10 @@ class App:
         if now - self.last_click < 0.2:
             return
         self.last_click = now
-        vx, vy = mx - 1, my - 3
+        vx, vy = mx - self.ox, my - self.oy
         if not (0 <= vx < self.cw and 0 <= vy < self.ch):
             return
-        if self.mode == 'detail' and self.panel_on and vx >= self.cw - self.panel_w:
+        if self.show_panel() and vx >= self.cw - self.panel_w:
             return
         px, py = vx * 2 + 1, vy * 4 + 2
         best, bd = None, 1e9
@@ -1914,7 +1938,7 @@ class App:
             self.draw_limb(sx, sy, r, L, b.atm)
         if not b.R and r > 25:
             self.draw_prominences(sx, sy, r)
-        if r >= 26 and self.mode != 'overview':
+        if r >= 26 and self.mode != 'overview' and not self.clean:
             for z, mx, my, mr, m, _ in moons:
                 if z > 0 or math.hypot(mx - sx, my - sy) > r + mr:
                     self.label(my / 4, (mx + mr + 3) / 2, m.names[LANGS.index(self.lang)], 243, prio=4)
@@ -2018,7 +2042,7 @@ class App:
     def overview_labels(self):
         zoomed = self.cam[4] > self.base_ppu * 2.5
         sel_info = None
-        for i, b in enumerate(self.bodies):
+        for i, b in enumerate(self.bodies if not self.clean else ()):
             X, Y, sx, sy, r = self.P[i]
             if r > 22:
                 continue
@@ -2060,11 +2084,11 @@ class App:
         if col + len(s) > self.cw:
             s = s[:max(0, self.cw - col)]
         if s:
-            self.put(3 + row, 1 + col, s, attr)
+            self.put(self.oy + row, self.ox + col, s, attr)
 
     def star_map(self, now):
         cam = self.cam
-        cw, ch = self.cw, self.ch
+        cw, ch, W, H, ox, oy = self.cw, self.ch, self.W, self.H, self.ox, self.oy
         shx = -cam[0] * cam[4] / 2
         shy = -cam[1] * cam[4] / 4
         m = {}
@@ -2072,9 +2096,13 @@ class App:
             s = math.sin(tw + now * sp)
             if s < -0.93:
                 continue
+            row = int((y + shy * dpt) % H) - oy
+            col = int((x + shx * dpt) % W) - ox
+            if not (0 <= row < ch and 0 <= col < cw):
+                continue
             if s > 0.95:
                 chh, c = ('+' if chh in '.·' else '*'), 255
-            m[int((y + shy * dpt) % ch) * cw + int((x + shx * dpt) % cw)] = (chh, c)
+            m[row * cw + col] = (chh, c)
         return m
 
     def compose(self, now):
@@ -2114,7 +2142,7 @@ class App:
             if buf:
                 runs.append((start, ''.join(buf), cur))
             for x, text, c in runs:
-                self.put(3 + row, 1 + x, text, A(c) if c is not None else 0)
+                self.put(self.oy + row, self.ox + x, text, A(c) if c is not None else 0)
 
     def panel_lines(self, b, inner):
         key = (b.idx, inner, self.lang)
@@ -2193,7 +2221,7 @@ class App:
     def draw_hud(self, now):
         A = self.pal.attr
         tr = self.trans
-        avail = self.cw - (self.panel_w if self.mode == 'detail' and self.panel_on else 0)
+        avail = self.cw - (self.panel_w if self.show_panel() else 0)
         if self.mode != 'detail':
             names = [self.name(b) for b in self.bodies]
             if sum(len(n) + 3 for n in names) > self.cw - 4:
@@ -2273,6 +2301,15 @@ class App:
             self.put(H - 2, x + len(key) + 3, desc, A(246))
             x += w + 4
 
+    def draw_clean_hint(self, now):
+        """In clean view: a short reminder of how to get the interface back, fading out."""
+        age = now - self.clean_t
+        if age > 3.0:
+            return
+        msg = self.U('clean_hint')
+        c = 248 if age < 2.0 else 243 if age < 2.5 else 239
+        self.vput(self.ch - 2, (self.cw - len(msg)) // 2, msg, self.pal.attr(c))
+
     def draw(self, now):
         if self.too_small:
             self.scr.erase()
@@ -2284,10 +2321,13 @@ class App:
         self.render_scene()
         self.compose(now)
         self.flush_labels()
-        if self.mode == 'detail' and self.panel_on:
-            self.draw_panel(now)
-        self.draw_hud(now)
-        self.draw_chrome(now)
+        if self.clean:
+            self.draw_clean_hint(now)
+        else:
+            if self.show_panel():
+                self.draw_panel(now)
+            self.draw_hud(now)
+            self.draw_chrome(now)
         self.flush()
 
     # ─────────────────────────── main loop ────────────────────────────
