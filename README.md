@@ -26,10 +26,14 @@ orbit
 
 ## Features
 
-- **The whole Solar System** — the Sun, eight planets, 14 moons, the asteroid belt, a comet
-  with ion and dust tails, and a lonely probe.
+- **The whole Solar System** — the Sun, eight planets, 14 moons, the asteroid belt, a periodic
+  comet and a lonely probe.
 - **Real positions** — at launch every planet sits where it actually is today (computed from
   mean orbital longitudes); after that, time runs faster.
+- **Passing comets** — every so often a new comet (with a designation like `C/2026 K7`) falls in
+  from deep space on a hyperbolic orbit, whips around the Sun and leaves for good. Its ion tail
+  always points away from the Sun, and the dust tail curves behind. In planet view, distant
+  comets drift across the sky behind the planet.
 - **Cinematic camera** — smooth zoom-and-pan flights (the van Wijk–Nuij optimal path) between
   the system view and any planet, and from planet to planet.
 - **Detailed procedural worlds**

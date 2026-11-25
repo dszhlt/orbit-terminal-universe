@@ -42,10 +42,12 @@ TAU = math.tau
 HALF_PI = math.pi / 2
 SIN_E = 0.38                          # camera elevation above the ecliptic plane
 COS_E = math.sqrt(1.0 - SIN_E * SIN_E)
+COS_E = math.sqrt(1.0 - SIN_E * SIN_E)
 TW, TH = 256, 128                     # surface texture resolution
 N_TEX = TW * TH
 FPS_TARGET = 30
 SPEEDS = (0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 40.0)
+ION_TAILS = ((159, 117, 38), (158, 115, 72), (189, 147, 104))  # blue, green, violet ion tails
 J2000_UNIX = 946728000.0              # 2000-01-01 12:00 UTC
 
 # Braille: dot bit for [row 0..3][column 0..1] inside a 2×4 cell
@@ -71,6 +73,15 @@ LAND = frozenset((28, 64, 107, 108, 137, 179, 186))   # Earth land colors (for c
 
 def clamp(x, a, b):
     return a if x < a else b if x > b else x
+
+
+def trailing(ax, ay, vx, vy):
+    """Unit vector across the tail direction (ax, ay), pointing against the motion (vx, vy):
+    the side a comet's dust tail curves towards."""
+    d = vx * ax + vy * ay
+    px, py = vx - d * ax, vy - d * ay
+    m = math.hypot(px, py)
+    return (-px / m, -py / m) if m > 1e-9 else (ay, -ax)
 
 
 def lerp(a, b, t):
@@ -1133,6 +1144,12 @@ class App:
             ang = rnd.random() * TAU if rnd.random() < 0.6 else rnd.choice(streamers) + rnd.gauss(0, 0.07)
             self.corona.append((ang, rnd.random(), rnd.uniform(0.08, 0.22), rnd.random() * TAU))
         self.comet = dict(a=86.0, e=0.86, w=2.3, T=170.0, M0=-0.55)
+        self.crnd = random.Random()                         # new visiting comets every run
+        self.visitors = []                                  # comets passing through the system
+        self.sky = []                                       # distant comets crossing the sky
+        self.vis_lab = []
+        self.next_visitor = -1.0                            # the first one arrives right away
+        self.next_sky = 1e9
         self.proms = [(rnd.random() * TAU, rnd.uniform(0.12, 0.22), rnd.uniform(0.08, 0.16),
                        rnd.random() * TAU) for _ in range(4)]
         self.n_objects = (len(self.bodies) + sum(len(b.moons) for b in self.bodies)
@@ -1297,10 +1314,10 @@ class App:
         m = math.sqrt(lx * lx + ly * ly + lz * lz)
         return (lx / m, ly / m, lz / m)
 
-    def comet_world(self):
+    def comet_world(self, t=None):
         c = self.comet
         e = c['e']
-        M = c['M0'] + TAU * self.t / c['T']
+        M = c['M0'] + TAU * (self.t if t is None else t) / c['T']
         E = M
         for _ in range(8):
             E -= (E - e * math.sin(E) - M) / (1 - e * math.cos(E))
@@ -1308,6 +1325,65 @@ class App:
         y = c['a'] * math.sqrt(1 - e * e) * math.sin(E)
         cw, sw = math.cos(c['w']), math.sin(c['w'])
         return x * cw - y * sw, x * sw + y * cw
+
+    def spawn_visitor(self, lead=1.0):
+        """A comet from the Oort cloud: in from deep space on a hyperbolic orbit, around the
+        Sun and away for good. `lead` is the share of the inbound leg still ahead of it."""
+        r = self.crnd
+        q = 11.0 + 34.0 * r.random() ** 2                 # perihelion: often close to the Sun
+        e = r.uniform(1.003, 1.25)
+        a = q / (e - 1.0)
+        H_out = math.acosh((270.0 / a + 1.0) / e)         # enters and leaves at r = 270
+        T = r.uniform(26.0, 40.0)                         # time from there to perihelion
+        w, inc = r.random() * TAU, r.uniform(-0.9, 0.9)
+        s = r.choice((1.0, -1.0))                         # prograde or retrograde
+        tp = self.t + T * lead
+        self.visitors.append(dict(
+            e=e, a=a, b=a * math.sqrt(e * e - 1.0), n=(e * math.sinh(H_out) - H_out) / T,
+            tp=tp, end=tp + T, P=(math.cos(w), math.sin(w), 0.0),
+            Q=(-math.sin(w) * s * math.cos(inc), math.cos(w) * s * math.cos(inc), math.sin(inc)),
+            name=f"C/{time.localtime().tm_year} {r.choice('ABCDEFGHJKLMNOPQRSTUVWXY')}{r.randint(1, 9)}",
+            ion=r.choice(ION_TAILS), seed=r.randrange(1 << 20)))
+
+    def visitor_state(self, v):
+        """Position and velocity direction of a passing comet, 3D world units."""
+        e, M = v['e'], v['n'] * (self.t - v['tp'])
+        H = math.copysign(math.log(2.0 * abs(M) / e + 1.8), M)
+        for _ in range(12):                               # hyperbolic Kepler equation
+            H -= (e * math.sinh(H) - H - M) / (e * math.cosh(H) - 1.0)
+        sh, chh = math.sinh(H), math.cosh(H)
+        x, y = v['a'] * (e - chh), v['b'] * sh
+        vx, vy = -v['a'] * sh, v['b'] * chh
+        P, Q = v['P'], v['Q']
+        return (tuple(P[k] * x + Q[k] * y for k in range(3)),
+                tuple(P[k] * vx + Q[k] * vy for k in range(3)))
+
+    def spawn_sky(self):
+        """A distant comet drifting across the sky behind the planet (planet view)."""
+        r = self.crnd
+        th = r.uniform(-0.6, 0.6) + r.choice((0.0, math.pi))     # mostly sideways
+        dx, dy = math.cos(th) * 2.8, math.sin(th) * 2.8
+        x0, y0 = r.uniform(0.2, 0.8) - dx / 2, r.uniform(0.15, 0.85) - dy / 2
+        f = 0.0                                           # start just outside the screen
+        while f < 0.5 and not (-0.04 < x0 + dx * f < 1.04 and -0.04 < y0 + dy * f < 1.04):
+            f += 0.01
+        dur = r.uniform(30.0, 55.0)
+        self.sky.append(dict(x0=x0, y0=y0, dx=dx, dy=dy, t0=self.t - dur * f, dur=dur,
+                             size=r.uniform(0.12, 0.28), ion=r.choice(ION_TAILS),
+                             seed=r.randrange(1 << 20)))
+
+    def update_comets(self):
+        t = self.t
+        self.visitors = [v for v in self.visitors if t < v['end']]
+        if t >= self.next_visitor:
+            if len(self.visitors) < 3:
+                self.spawn_visitor(0.55 if self.next_visitor < 0 else 1.0)
+            self.next_visitor = t + self.crnd.uniform(15.0, 40.0)
+        self.sky = [c for c in self.sky if t < c['t0'] + c['dur']]
+        if self.mode == 'detail' and t >= self.next_sky:
+            if len(self.sky) < 2:
+                self.spawn_sky()
+            self.next_sky = t + self.crnd.uniform(14.0, 36.0)
 
     # ─────────────────────────── controls ─────────────────────────────
 
@@ -1461,6 +1537,7 @@ class App:
     def update(self, dt, now):
         if not self.paused:
             self.t += dt * SPEEDS[self.speed_i]
+        self.update_comets()
         cam = self.cam
         pw = self.cv.pw
         tr = self.trans
@@ -1477,6 +1554,8 @@ class App:
                 self.mode = tr['dest']
                 self.trans = None
                 self.arrive = now
+                if self.mode == 'detail':                    # a comet in the sky soon after arrival
+                    self.next_sky = min(self.next_sky, self.t + self.crnd.uniform(3.0, 12.0))
                 self.lite = False
             return
         tg = self.detail_cam(self.target) if self.mode == 'detail' else self.overview_cam()
@@ -1976,6 +2055,7 @@ class App:
         steady = self.mode == 'detail'
 
         self.P = []
+        self.vis_lab = []
         for b in self.bodies:
             X, Y = self.body_world(b)
             self.P.append((X, Y, ox + X * ppu, oy + Y * SIN_E * ppu, b.r * ppu))
@@ -1996,6 +2076,9 @@ class App:
                 if 0 <= x < pw and 0 <= y < ph:
                     (back if s > 0 else front).append((x, y, 243))
             self.add_comet(ox, oy, ppu, back, front)
+            self.add_visitors(ox, oy, ppu, back, front)
+        elif steady:
+            self.add_sky(ox, oy, back)
 
         cv.plot_pts(back)
         order = sorted(range(1, len(self.bodies)), key=lambda i: self.P[i][1])
@@ -2012,32 +2095,76 @@ class App:
         if self.mode != 'detail':
             self.overview_labels()
 
-    def add_comet(self, ox, oy, ppu, back, front):
-        X, Y = self.comet_world()
-        dist = math.hypot(X, Y)
-        hx, hy = ox + X * ppu, oy + Y * SIN_E * ppu
-        lst = back if Y < 0 else front
-        dxs, dys = X / dist, Y * SIN_E / dist
-        m = math.hypot(dxs, dys) or 1.0
-        dxs, dys = dxs / m, dys / m
-        tail = clamp(520.0 / dist, 1.5, 34.0) * ppu
-        n = int(clamp(tail / 1.6, 3, 180))
+    def comet_pts(self, hx, hy, ax, ay, tail, lst, seed=0, ion=ION_TAILS[0], trail=None,
+                  coma=4, head=255):
+        """A comet at screen point (hx, hy): a straight ion tail `tail` pixels long along the
+        anti-solar unit vector (ax, ay), and a dust tail curving towards `trail`."""
+        bx, by = trail if trail else (ay, -ax)
+        n = int(clamp(tail / 1.2, 4, 220))
         tick = int(self.t * 8)
+        c1, c2, c3 = ion
         for k in range(n):
             f = (k + 1) / n
-            h = ((k * 2654435761 + tick * 40503) >> 5) % 1000 / 1000.0
-            if h < f * 0.65:
+            h = (((k + seed) * 2654435761 + tick * 40503) >> 5) % 1000 / 1000.0
+            if h < f * 0.55:
                 continue
             spread = (h - 0.5) * f * tail * 0.12
-            x = hx + dxs * tail * f - dys * spread
-            y = hy + dys * tail * f + dxs * spread
-            lst.append((x, y, 159 if f < 0.3 else 117 if f < 0.6 else 31))
+            lst.append((hx + ax * tail * f - ay * spread, hy + ay * tail * f + ax * spread,
+                        c1 if f < 0.3 else c2 if f < 0.6 else c3))
             if k % 2 == 0:                                   # the dust tail is curved
                 bend = f * f * tail * 0.22
-                lst.append((hx + dxs * tail * f * 0.8 + dys * bend,
-                            hy + dys * tail * f * 0.8 - dxs * bend, 230 if f < 0.4 else 244))
-        for ddx, ddy in ((0, 0), (1, 0), (0, 1), (1, 1)):
-            lst.append((hx + ddx, hy + ddy, 255))
+                lst.append((hx + ax * tail * f * 0.8 + bx * bend,
+                            hy + ay * tail * f * 0.8 + by * bend, 230 if f < 0.4 else 244))
+        for ddx, ddy in ((0, 0), (1, 0), (0, 1), (1, 1))[:coma]:
+            lst.append((hx + ddx, hy + ddy, head))
+
+    def add_comet(self, ox, oy, ppu, back, front):
+        X, Y = self.comet_world()
+        X1, Y1 = self.comet_world(self.t - 0.05)
+        dist = math.hypot(X, Y)
+        ax, ay = X / dist, Y * SIN_E / dist
+        m = math.hypot(ax, ay) or 1.0
+        ax, ay = ax / m, ay / m
+        self.comet_pts(ox + X * ppu, oy + Y * SIN_E * ppu, ax, ay,
+                       clamp(520.0 / dist, 1.5, 34.0) * ppu, back if Y < 0 else front,
+                       trail=trailing(ax, ay, X - X1, (Y - Y1) * SIN_E))
+
+    def add_visitors(self, ox, oy, ppu, back, front):
+        pw, ph = self.cv.pw, self.cv.ph
+        for v in self.visitors:
+            (X, Y, Z), (vx, vy, vz) = self.visitor_state(v)
+            r = math.sqrt(X * X + Y * Y + Z * Z)
+            hx, hy = ox + X * ppu, oy + (Y * SIN_E - Z * COS_E) * ppu
+            k = clamp(1100.0 / r, 3.0, 48.0) * ppu / r     # tail along the anti-solar direction,
+            ax, ay = X * k, (Y * SIN_E - Z * COS_E) * k     # foreshortened by perspective
+            tail = math.hypot(ax, ay)
+            if tail < 1e-6:
+                continue
+            ax, ay = ax / tail, ay / tail
+            tail = max(tail, 2.0)
+            mg = tail + 4
+            if not (-mg < hx < pw + mg and -mg < hy < ph + mg):
+                continue
+            self.comet_pts(hx, hy, ax, ay, tail, front if Y * COS_E + Z * SIN_E > 0 else back,
+                           v['seed'], v['ion'], trailing(ax, ay, vx, vy * SIN_E - vz * COS_E),
+                           coma=4 if r < 90 else 2)
+            if r < 150:
+                self.vis_lab.append((hx, hy, ax, ay, v['name']))
+
+    def add_sky(self, ox, oy, lst):
+        pw, ph = self.cv.pw, self.cv.ph
+        for c in self.sky:
+            f = (self.t - c['t0']) / c['dur']
+            hx, hy = (c['x0'] + c['dx'] * f) * pw, (c['y0'] + c['dy'] * f) * ph
+            vx, vy = c['dx'] * pw, c['dy'] * ph
+            ax, ay = hx - ox, hy - oy                       # the tail points away from the Sun
+            m = math.hypot(ax, ay)
+            if m < 1.0:
+                ax, ay, m = -vx, -vy, math.hypot(vx, vy)
+            ax, ay = ax / m, ay / m
+            ion = c['ion']
+            self.comet_pts(hx, hy, ax, ay, c['size'] * ph, lst, c['seed'], (ion[1], ion[2], ion[2]),
+                           trailing(ax, ay, vx, vy), coma=2, head=253)
 
     def overview_labels(self):
         zoomed = self.cam[4] > self.base_ppu * 2.5
@@ -2060,6 +2187,9 @@ class App:
                 self.label(row, col, chh, 80, prio=9)
             self.label(sy / 4, ri + 2, self.name(b), 80, True, prio=10)
             self.label(sy / 4 + 1, ri + 2, self.T(b)['au'], 244, prio=10)
+        for hx, hy, ax, ay, name in (self.vis_lab if not self.clean else ()):
+            col = hx / 2 + 2 if ax <= 0 else hx / 2 - 2 - len(name)    # away from the tail
+            self.label(hy / 4 + (-1 if ay > 0.3 else 1), col, name, 239, prio=2)
         # a probe on a distant orbit
         a = 0.9 + 0.012 * self.t
         cam = self.cam
@@ -2272,7 +2402,7 @@ class App:
         self.put(1, W - 3 - len(fps) - 4 - len(st), st, sc)
         # status line
         zoom = self.cam[4] / self.base_ppu * 100
-        segs = [('OBJECTS', str(self.n_objects)), ('TIME', f'{SPEEDS[self.speed_i]:.2f}x'),
+        segs = [('OBJECTS', str(self.n_objects + len(self.visitors))), ('TIME', f'{SPEEDS[self.speed_i]:.2f}x'),
                 ('ZOOM', f'{zoom:.0f}%'), ('SECTOR', f'SOL-{self.sel:02d}')]
         x = 3
         for k, (lab, val) in enumerate(segs):
